@@ -1,0 +1,9 @@
+timestamp,commit,machine,file_count,full_s,incremental_s,steady_s,inc_faster_pct,steady_faster_pct,report
+20260306-152556,nogit,arm64-15.7.3,300,0.56,0.54,0.53,3.57,5.36,./reports/benchmark-scan-20260306-152600.md
+20260306-152556,nogit,arm64-15.7.3,600,0.55,0.55,0.54,0.00,1.82,./reports/benchmark-scan-20260306-152603.md
+20260306-212154,nogit,arm64-15.7.3,400,0.83,0.55,0.56,33.73,32.53,./reports/benchmark-scan-20260306-212159.md
+20260306-212154,nogit,arm64-15.7.3,800,0.55,0.52,0.54,5.45,1.82,./reports/benchmark-scan-20260306-212202.md
+20260306-212203,nogit,arm64-15.7.3,400,0.55,0.55,0.52,0.00,5.45,./reports/benchmark-scan-20260306-212206.md
+20260306-212203,nogit,arm64-15.7.3,800,0.55,0.57,0.55,-3.64,0.00,./reports/benchmark-scan-20260306-212210.md
+20260306-212420,nogit,arm64-15.7.3,400,0.55,0.53,0.53,3.64,3.64,./reports/benchmark-scan-20260306-212424.md
+20260306-212420,nogit,arm64-15.7.3,800,0.55,0.54,0.55,1.82,0.00,./reports/benchmark-scan-20260306-212428.md

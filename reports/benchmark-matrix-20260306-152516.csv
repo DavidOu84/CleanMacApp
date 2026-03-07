@@ -1,0 +1,3 @@
+file_count,full_s,incremental_s,steady_s,inc_faster_pct,steady_faster_pct,report
+300,,,,40.00,40.00,./reports/benchmark-scan-20260306-152521.md
+600,,,,-1.85,-1.85,./reports/benchmark-scan-20260306-152524.md

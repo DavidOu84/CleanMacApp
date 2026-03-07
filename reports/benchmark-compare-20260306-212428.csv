@@ -1,0 +1,3 @@
+file_count,baseline_full_s,candidate_full_s,full_delta_s,full_delta_pct,baseline_incremental_s,candidate_incremental_s,incremental_delta_s,incremental_delta_pct,baseline_steady_s,candidate_steady_s,steady_delta_s,steady_delta_pct
+400,0.8300,0.5500,-0.2800,-33.73,0.5500,0.5300,-0.0200,-3.64,0.5600,0.5300,-0.0300,-5.36
+800,0.5500,0.5500,0.0000,0.00,0.5200,0.5400,0.0200,3.85,0.5400,0.5500,0.0100,1.85
