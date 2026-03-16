@@ -61,6 +61,10 @@ public actor DefaultScanUseCase: ScanUseCase {
         var seenPaths = Set<String>()
         var baselineFingerprints: [String: FileFingerprint] = [:]
 
+        defer {
+            finishStream(sessionID: sessionID)
+        }
+
         do {
             do {
                 baselineFingerprints = try await loadBaselineIfAvailable(sessionID: sessionID, scope: scope)
@@ -77,7 +81,7 @@ public actor DefaultScanUseCase: ScanUseCase {
                         finishedAt: Date(),
                         errorMessage: nil
                     )
-                    finishStream(sessionID: sessionID)
+                    try? await store.performMaintenance()
                     return
                 }
 
@@ -132,7 +136,7 @@ public actor DefaultScanUseCase: ScanUseCase {
                     isIndeterminate: false
                 )
             )
-            finishStream(sessionID: sessionID)
+            try? await store.performMaintenance()
         } catch {
             do {
                 try await store.updateProgress(sessionID: sessionID, scannedCount: scannedCount, scannedBytes: scannedBytes)
@@ -145,7 +149,7 @@ public actor DefaultScanUseCase: ScanUseCase {
             } catch {
                 // Nothing else to do if persistence fails while handling scan failure.
             }
-            finishStream(sessionID: sessionID)
+            try? await store.performMaintenance()
         }
     }
 

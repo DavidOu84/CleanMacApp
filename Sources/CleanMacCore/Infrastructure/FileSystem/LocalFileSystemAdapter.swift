@@ -110,18 +110,20 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
     }
 
     public func moveToTrash(paths: [String]) async -> [String: Error] {
-        let fileManager = FileManager.default
-        var failures: [String: Error] = [:]
+        await Task.detached(priority: .utility) {
+            let fileManager = FileManager.default
+            var failures: [String: Error] = [:]
 
-        for path in paths {
-            do {
-                try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-            } catch {
-                failures[path] = error
+            for path in paths {
+                do {
+                    try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+                } catch {
+                    failures[path] = error
+                }
             }
-        }
 
-        return failures
+            return failures
+        }.value
     }
 
     public func fileExists(_ path: String) -> Bool {

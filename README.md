@@ -16,6 +16,7 @@ This repository now contains the first runnable implementation slice for the mac
   - `~/Documents`
   - `~/Downloads`
   - `~/Library/Caches`
+- Desktop UI also supports an experimental full-disk scan mode (`/`) with permission prompt guidance.
 - Scan session lifecycle:
   - create session
   - incremental baseline reuse (clone last finished scope + update changed files + remove deleted files)
@@ -26,13 +27,18 @@ This repository now contains the first runnable implementation slice for the mac
 - Recommendation candidates:
   - large files (`>= 500MB`)
   - cache files (`.../Library/Caches/...`)
-  - duplicate files (size bucket + quick hash + full hash)
+  - duplicate files (size bucket + quick hash + full hash, keep 1 unselected by default and preselect the other duplicate copies)
 - Candidate summary and Top N candidate listing in CLI
 - Cleanup execution:
   - move selected candidates to Trash
   - persist cleanup jobs and per-file cleanup results
+  - show post-cleanup reminder that disk is only reclaimed after emptying Trash
+- Automatic local database maintenance:
+  - keeps only recent scan sessions
+  - prunes stale index/candidate/history rows to prevent unbounded DB growth
 - Desktop UI features:
   - candidate filtering (query + min size) and sorting
+  - per-candidate deletion guidance (file info + safety hint + delete advice)
   - per-type filter presets persisted in `UserDefaults`
   - cleanup history pagination + search (job fields + file path + error message, FTS indexed + relevance/recency ranking + ranking profile picker)
   - retry failed items by whole job or selected file paths
@@ -81,6 +87,12 @@ Desktop app shell:
 
 ```bash
 .build/debug/cleanmacapp-desktop
+```
+
+Desktop app bundle (Dock icon + Cmd+Tab):
+
+```bash
+./scripts/run_desktop_app.sh
 ```
 
 Export a cleanup report by job id:

@@ -3,7 +3,20 @@ import Foundation
 
 @MainActor
 final class AppViewModel: ObservableObject {
-    @Published var useQuickScan = true
+    @Published var useQuickScan = true {
+        didSet {
+            if useQuickScan {
+                useFullDiskScan = false
+            }
+        }
+    }
+    @Published var useFullDiskScan = false {
+        didSet {
+            if useFullDiskScan {
+                useQuickScan = false
+            }
+        }
+    }
     @Published var customPathsText = ""
     @Published var isScanning = false
     @Published var isLoadingRecommendations = false
@@ -194,7 +207,7 @@ final class AppViewModel: ObservableObject {
                 latestCleanupJobID = summary.jobID
 
                 isCleaning = false
-                statusText = "Retry finished: success=\(summary.successCount), fail=\(summary.failCount), reclaimed=\(ByteFormatting.string(from: summary.reclaimedBytes))"
+                statusText = "Retry finished: success=\(summary.successCount), fail=\(summary.failCount), moved=\(ByteFormatting.string(from: summary.reclaimedBytes)). Items are in Trash; empty Trash to free disk."
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
                 if let sessionID = latestSessionID {
@@ -251,7 +264,7 @@ final class AppViewModel: ObservableObject {
                 latestCleanupJobID = summary.jobID
 
                 isCleaning = false
-                statusText = "Retry selected finished: success=\(summary.successCount), fail=\(summary.failCount), reclaimed=\(ByteFormatting.string(from: summary.reclaimedBytes))"
+                statusText = "Retry selected finished: success=\(summary.successCount), fail=\(summary.failCount), moved=\(ByteFormatting.string(from: summary.reclaimedBytes)). Items are in Trash; empty Trash to free disk."
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
                 if let sessionID = latestSessionID {
@@ -280,6 +293,115 @@ final class AppViewModel: ObservableObject {
 
     func filteredCandidatesForSelectedType() -> [CleanupCandidate] {
         filteredCandidates(for: selectedCandidateType)
+    }
+
+    func deletionHint(for candidate: CleanupCandidate) -> CandidateDeletionHint {
+        let lowerPath = candidate.filePath.lowercased()
+        let fileURL = URL(fileURLWithPath: candidate.filePath)
+        let ext = fileURL.pathExtension.lowercased()
+        let folderName = fileURL.deletingLastPathComponent().lastPathComponent
+
+        let location: String
+        if lowerPath.contains("/library/caches/") {
+            location = "Library/Caches"
+        } else if lowerPath.contains("/downloads/") {
+            location = "Downloads"
+        } else if lowerPath.contains("/desktop/") {
+            location = "Desktop"
+        } else if lowerPath.contains("/documents/") {
+            location = "Documents"
+        } else {
+            location = folderName.isEmpty ? "Unknown" : folderName
+        }
+
+        let extText = ext.isEmpty ? "none" : ext
+        let info = "Type: \(candidate.type.displayName) | Ext: .\(extText) | Location: \(location)"
+
+        switch candidate.type {
+        case .cache:
+            if lowerPath.contains("/library/caches/") || lowerPath.contains("/var/folders/") || lowerPath.contains("/tmp/") {
+                return CandidateDeletionHint(
+                    level: .safe,
+                    info: info,
+                    advice: "Usually safe to delete. App cache will be rebuilt automatically."
+                )
+            }
+            return CandidateDeletionHint(
+                level: .caution,
+                info: info,
+                advice: "Likely cache-related. Delete when app is closed, then verify app behavior."
+            )
+
+        case .duplicate:
+            if candidate.reason.hasPrefix("Keep copy (recommended)") {
+                return CandidateDeletionHint(
+                    level: .review,
+                    info: info,
+                    advice: "Retained copy for this duplicate group. Keep this one and delete the other duplicates."
+                )
+            }
+
+            if lowerPath.contains("/library/caches/") {
+                return CandidateDeletionHint(
+                    level: .safe,
+                    info: info,
+                    advice: "Duplicate cache file. Usually safe to remove, but keep at least one copy."
+                )
+            }
+            return CandidateDeletionHint(
+                level: .safe,
+                info: info,
+                advice: "Extra duplicate copy. Safe to delete as long as the retained copy stays."
+            )
+
+        case .largeFile:
+            let saferExtensions: Set<String> = ["zip", "rar", "7z", "dmg", "pkg", "iso", "tar", "gz", "xz", "bz2", "log", "tmp", "bak"]
+            let personalExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "mov", "mp4", "m4v", "mp3", "wav", "aiff", "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "pages", "numbers", "key", "psd", "ai"]
+
+            if saferExtensions.contains(ext), lowerPath.contains("/downloads/") {
+                return CandidateDeletionHint(
+                    level: .safe,
+                    info: info,
+                    advice: "Looks like a downloaded package/archive. Usually safe after confirming it is no longer needed."
+                )
+            }
+
+            if personalExtensions.contains(ext) {
+                return CandidateDeletionHint(
+                    level: .review,
+                    info: info,
+                    advice: "Potential personal/work file. Review content first, or move to external storage."
+                )
+            }
+
+            switch candidate.risk {
+            case .low:
+                return CandidateDeletionHint(
+                    level: .safe,
+                    info: info,
+                    advice: "Low-risk large file candidate. Verify once, then delete if not needed."
+                )
+            case .medium:
+                return CandidateDeletionHint(
+                    level: .caution,
+                    info: info,
+                    advice: "May still be useful. Confirm last usage before deleting."
+                )
+            case .high:
+                return CandidateDeletionHint(
+                    level: .review,
+                    info: info,
+                    advice: "High-risk large file. Recommended to keep or back up before deletion."
+                )
+            }
+
+        case .oldDownload, .installerPackage:
+            return CandidateDeletionHint(
+                level: .caution,
+                info: info,
+                advice: "Review once before deletion."
+            )
+        }
     }
 
     func isCandidateSelected(_ candidate: CleanupCandidate) -> Bool {
@@ -394,7 +516,7 @@ final class AppViewModel: ObservableObject {
                 )
 
                 latestCleanupJobID = summary.jobID
-                statusText = "Cleanup finished: success=\(summary.successCount), fail=\(summary.failCount), reclaimed=\(ByteFormatting.string(from: summary.reclaimedBytes))"
+                statusText = "Cleanup finished: success=\(summary.successCount), fail=\(summary.failCount), moved=\(ByteFormatting.string(from: summary.reclaimedBytes)). Items are in Trash; empty Trash to free disk."
                 isCleaning = false
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
@@ -435,6 +557,13 @@ final class AppViewModel: ObservableObject {
     }
 
     private func buildScope() -> ScanScope {
+        if useFullDiskScan {
+            return ScanScope(
+                roots: [URL(fileURLWithPath: "/", isDirectory: true)],
+                isQuickMode: false
+            )
+        }
+
         if useQuickScan {
             return QuickScanScopeBuilder.build()
         }
@@ -696,4 +825,27 @@ private struct CandidateFilterPreset: Codable {
     let sortRawValue: String
 
     static let `default` = CandidateFilterPreset(query: "", minSizeMB: 0, sortRawValue: CandidateSortOption.sizeDesc.rawValue)
+}
+
+struct CandidateDeletionHint {
+    let level: DeletionSafetyLevel
+    let info: String
+    let advice: String
+}
+
+enum DeletionSafetyLevel {
+    case safe
+    case caution
+    case review
+
+    var displayName: String {
+        switch self {
+        case .safe:
+            return "Safe"
+        case .caution:
+            return "Caution"
+        case .review:
+            return "Review First"
+        }
+    }
 }

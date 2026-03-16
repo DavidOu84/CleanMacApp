@@ -55,4 +55,9 @@ public protocol ScanSessionStore: Sendable {
     func fetchFailedCleanupItems(jobID: CleanupJobID) async throws -> [FailedCleanupItem]
     func fetchRecentCleanupJobs(limit: Int, offset: Int, query: String?) async throws -> [CleanupJobRecord]
     func fetchCleanupResults(jobID: CleanupJobID, query: String?) async throws -> [CleanupResultRecord]
+    func performMaintenance() async throws
+}
+
+public extension ScanSessionStore {
+    func performMaintenance() async throws {}
 }

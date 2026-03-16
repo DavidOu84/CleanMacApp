@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct CleanMacAppDesktopApp: App {
@@ -6,6 +9,11 @@ struct CleanMacAppDesktopApp: App {
     private let startupError: String?
 
     init() {
+#if os(macOS)
+        // Ensure the app behaves as a standard foreground app (Dock + Cmd+Tab).
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+#endif
         do {
             let env = try AppEnvironment.live()
             viewModel = AppViewModel(env: env)

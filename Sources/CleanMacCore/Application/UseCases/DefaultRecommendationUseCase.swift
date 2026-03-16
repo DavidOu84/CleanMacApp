@@ -141,6 +141,21 @@ public struct DefaultRecommendationUseCase: RecommendationUseCase {
                         continue
                     }
 
+                    if !addedPaths.contains(keep.path), candidates.count < rules.maxCandidatesPerType {
+                        addedPaths.insert(keep.path)
+                        candidates.append(
+                            CleanupCandidate(
+                                sessionID: sessionID,
+                                filePath: keep.path,
+                                estimatedBytes: keep.sizeBytes,
+                                type: .duplicate,
+                                reason: "Keep copy (recommended) for duplicate group",
+                                risk: .high,
+                                selectedByDefault: false
+                            )
+                        )
+                    }
+
                     for duplicate in sorted.dropFirst() {
                         if candidates.count >= rules.maxCandidatesPerType {
                             break
@@ -157,7 +172,7 @@ public struct DefaultRecommendationUseCase: RecommendationUseCase {
                                 estimatedBytes: duplicate.sizeBytes,
                                 type: .duplicate,
                                 reason: "Duplicate of \(keep.path)",
-                                risk: .medium,
+                                risk: .low,
                                 selectedByDefault: true
                             )
                         )

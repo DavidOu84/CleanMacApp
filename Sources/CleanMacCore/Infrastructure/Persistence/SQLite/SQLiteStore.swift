@@ -9,9 +9,17 @@ public enum SQLiteStoreError: Error {
 
 public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
     private let db: OpaquePointer?
+    private let databaseURL: URL
     private let lock = NSLock()
+    private var lastMaintenanceAt: Date = .distantPast
+    private let maintenanceInterval: TimeInterval = 5 * 60
+    private let staleRunningSessionTimeout: TimeInterval = 6 * 60 * 60
+    private let keepRecentSessions = 3
+    private let vacuumThresholdBytes: Int64 = 1_000_000_000
 
     public init(databaseURL: URL) throws {
+        self.databaseURL = databaseURL
+
         let fileManager = FileManager.default
         let folder = databaseURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -313,6 +321,28 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
                 scannedBytes: scannedBytes,
                 errorMessage: errorMessage
             )
+        }
+    }
+
+    public func performMaintenance() async throws {
+        try lockAndRun {
+            let now = Date()
+            if now.timeIntervalSince(lastMaintenanceAt) < maintenanceInterval {
+                return
+            }
+            lastMaintenanceAt = now
+
+            try normalizeStaleRunningSessions(now: now)
+            let staleSessionIDs = try fetchStaleSessionIDs(keepingMostRecent: keepRecentSessions)
+            if !staleSessionIDs.isEmpty {
+                try pruneSessions(sessionIDs: staleSessionIDs)
+            }
+
+            try execute(sql: "PRAGMA wal_checkpoint(TRUNCATE);")
+
+            if !staleSessionIDs.isEmpty && databaseFileSize() >= vacuumThresholdBytes {
+                try execute(sql: "VACUUM;")
+            }
         }
     }
 
@@ -1491,6 +1521,139 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
         lock.lock()
         defer { lock.unlock() }
         return try operation()
+    }
+
+    private func fetchStaleSessionIDs(keepingMostRecent keepCount: Int) throws -> [String] {
+        let sql = """
+        SELECT id
+        FROM scan_session
+        WHERE status <> ?
+        ORDER BY started_at DESC
+        LIMIT -1 OFFSET ?;
+        """
+
+        guard let statement = try prepare(sql: sql) else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, ScanStatus.running.rawValue, -1, transientDestructor)
+        sqlite3_bind_int(statement, 2, Int32(max(0, keepCount)))
+
+        var ids: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = stringValue(statement, at: 0), !id.isEmpty {
+                ids.append(id)
+            }
+        }
+
+        return ids
+    }
+
+    private func normalizeStaleRunningSessions(now: Date) throws {
+        let cutoff = now.addingTimeInterval(-staleRunningSessionTimeout).timeIntervalSince1970
+        try execute(
+            sql: """
+            UPDATE scan_session
+            SET status = ?, finished_at = ?, error_message = ?
+            WHERE status = ? AND started_at < ?;
+            """,
+            binder: { stmt in
+                sqlite3_bind_text(stmt, 1, "failed:interrupted", -1, transientDestructor)
+                sqlite3_bind_double(stmt, 2, now.timeIntervalSince1970)
+                sqlite3_bind_text(stmt, 3, "Scan interrupted unexpectedly; auto-closed by maintenance.", -1, transientDestructor)
+                sqlite3_bind_text(stmt, 4, ScanStatus.running.rawValue, -1, transientDestructor)
+                sqlite3_bind_double(stmt, 5, cutoff)
+            }
+        )
+    }
+
+    private func pruneSessions(sessionIDs: [String]) throws {
+        guard !sessionIDs.isEmpty else { return }
+
+        let chunkSize = 200
+        var start = 0
+
+        while start < sessionIDs.count {
+            let end = min(start + chunkSize, sessionIDs.count)
+            let chunk = Array(sessionIDs[start..<end])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+
+            try execute(
+                sql: """
+                DELETE FROM cleanup_result
+                WHERE job_id IN (
+                    SELECT id FROM cleanup_job WHERE session_id IN (\(placeholders))
+                );
+                """,
+                binder: { stmt in
+                    for (index, id) in chunk.enumerated() {
+                        sqlite3_bind_text(stmt, Int32(index + 1), id, -1, transientDestructor)
+                    }
+                }
+            )
+
+            try execute(
+                sql: """
+                DELETE FROM cleanup_job
+                WHERE session_id IN (\(placeholders));
+                """,
+                binder: { stmt in
+                    for (index, id) in chunk.enumerated() {
+                        sqlite3_bind_text(stmt, Int32(index + 1), id, -1, transientDestructor)
+                    }
+                }
+            )
+
+            try execute(
+                sql: """
+                DELETE FROM cleanup_candidate
+                WHERE session_id IN (\(placeholders));
+                """,
+                binder: { stmt in
+                    for (index, id) in chunk.enumerated() {
+                        sqlite3_bind_text(stmt, Int32(index + 1), id, -1, transientDestructor)
+                    }
+                }
+            )
+
+            try execute(
+                sql: """
+                DELETE FROM file_index
+                WHERE session_id IN (\(placeholders));
+                """,
+                binder: { stmt in
+                    for (index, id) in chunk.enumerated() {
+                        sqlite3_bind_text(stmt, Int32(index + 1), id, -1, transientDestructor)
+                    }
+                }
+            )
+
+            try execute(
+                sql: """
+                DELETE FROM scan_session
+                WHERE id IN (\(placeholders));
+                """,
+                binder: { stmt in
+                    for (index, id) in chunk.enumerated() {
+                        sqlite3_bind_text(stmt, Int32(index + 1), id, -1, transientDestructor)
+                    }
+                }
+            )
+
+            start = end
+        }
+    }
+
+    private func databaseFileSize() -> Int64 {
+        guard
+            let attrs = try? FileManager.default.attributesOfItem(atPath: databaseURL.path),
+            let number = attrs[.size] as? NSNumber
+        else {
+            return 0
+        }
+
+        return number.int64Value
     }
 
     private func prepare(sql: String) throws -> OpaquePointer? {
