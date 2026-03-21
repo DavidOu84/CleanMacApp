@@ -155,7 +155,7 @@ struct ContentView: View {
             if viewModel.isScanning {
                 ProgressView()
                     .progressViewStyle(.linear)
-                Text("Candidates are finalized after scan completes. You can click Refresh to preview partial results during scanning.")
+                Text("Preview recommendations auto-refresh during scanning. Duplicate analysis runs after scan completion to keep memory usage lower.")
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(.secondary)
             }

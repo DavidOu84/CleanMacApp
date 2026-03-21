@@ -13,8 +13,15 @@ public protocol DashboardUseCase: Sendable {
 
 public protocol RecommendationUseCase: Sendable {
     func build(sessionID: ScanSessionID, rules: RecommendationRules) async throws
+    func buildPreview(sessionID: ScanSessionID, rules: RecommendationRules) async throws
     func list(sessionID: ScanSessionID, type: CandidateType, limit: Int) async throws -> [CleanupCandidate]
     func summary(sessionID: ScanSessionID, type: CandidateType) async throws -> CandidateSummary
+}
+
+public extension RecommendationUseCase {
+    func buildPreview(sessionID: ScanSessionID, rules: RecommendationRules) async throws {
+        try await build(sessionID: sessionID, rules: rules)
+    }
 }
 
 public protocol CleanupUseCase: Sendable {

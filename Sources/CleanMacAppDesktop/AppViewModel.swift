@@ -76,6 +76,10 @@ final class AppViewModel: ObservableObject {
     private let env: AppEnvironment
     private var progressTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
+    private var lastAutoPreviewAt: Date = .distantPast
+    private var lastAutoPreviewScannedCount = 0
+    private let autoPreviewInterval: TimeInterval = 15
+    private let autoPreviewScannedDelta = 120_000
 
     private let defaults = UserDefaults.standard
     private let presetsKey = "cleanmacapp.candidate-filter-presets.v1"
@@ -122,6 +126,8 @@ final class AppViewModel: ObservableObject {
                 latestSessionID = sessionID
                 isScanning = true
                 statusText = "Scanning..."
+                lastAutoPreviewAt = .distantPast
+                lastAutoPreviewScannedCount = 0
 
                 startProgressStream(sessionID: sessionID)
                 startMonitor(sessionID: sessionID)
@@ -148,7 +154,7 @@ final class AppViewModel: ObservableObject {
             if isScanning {
                 statusText = "Building partial recommendations from current scan progress..."
             }
-            await rebuildAndLoadRecommendations(sessionID: sessionID)
+            await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: isScanning)
         }
     }
 
@@ -214,7 +220,7 @@ final class AppViewModel: ObservableObject {
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
                 if let sessionID = latestSessionID {
-                    await rebuildAndLoadRecommendations(sessionID: sessionID)
+                    await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false)
                 }
             } catch {
                 isCleaning = false
@@ -271,7 +277,7 @@ final class AppViewModel: ObservableObject {
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
                 if let sessionID = latestSessionID {
-                    await rebuildAndLoadRecommendations(sessionID: sessionID)
+                    await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false)
                 }
             } catch {
                 isCleaning = false
@@ -523,7 +529,7 @@ final class AppViewModel: ObservableObject {
                 isCleaning = false
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
-                await rebuildAndLoadRecommendations(sessionID: sessionID)
+                await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false)
             } catch {
                 isCleaning = false
                 statusText = "Cleanup failed: \(error.localizedDescription)"
@@ -608,6 +614,9 @@ final class AppViewModel: ObservableObject {
 
                 switch snapshot.status {
                 case .idle, .running:
+                    if shouldAutoRefreshPreview(scannedCount: snapshot.scannedCount) {
+                        await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: true)
+                    }
                     continue
                 case .finished:
                     isScanning = false
@@ -617,14 +626,14 @@ final class AppViewModel: ObservableObject {
                     progressTask?.cancel()
 
                     await loadTopDirectories(sessionID: sessionID)
-                    await rebuildAndLoadRecommendations(sessionID: sessionID)
+                    await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false)
                     return
                 case .cancelled:
                     isScanning = false
                     progressTask?.cancel()
-                    statusText = "Scan cancelled. Building recommendations from scanned files..."
+                    statusText = "Scan cancelled. Building partial recommendations from scanned files..."
                     await loadTopDirectories(sessionID: sessionID)
-                    await rebuildAndLoadRecommendations(sessionID: sessionID)
+                    await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: true)
                     return
                 case let .failed(message):
                     isScanning = false
@@ -644,11 +653,18 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func rebuildAndLoadRecommendations(sessionID: ScanSessionID) async {
+    private func rebuildAndLoadRecommendations(sessionID: ScanSessionID, previewOnly: Bool) async {
+        guard !isLoadingRecommendations else { return }
+
         do {
             isLoadingRecommendations = true
-            statusText = "Building recommendations..."
-            try await env.recommendationUseCase.build(sessionID: sessionID, rules: .default)
+            statusText = previewOnly ? "Building lightweight recommendations..." : "Building recommendations..."
+
+            if previewOnly {
+                try await env.recommendationUseCase.buildPreview(sessionID: sessionID, rules: .default)
+            } else {
+                try await env.recommendationUseCase.build(sessionID: sessionID, rules: .default)
+            }
 
             var summaries: [CandidateType: CandidateSummary] = [:]
             var items: [CandidateType: [CleanupCandidate]] = [:]
@@ -669,12 +685,27 @@ final class AppViewModel: ObservableObject {
             candidateSummaries = summaries
             candidatesByType = items
             selectedCandidateIDsByType = selected
-            statusText = "Recommendations ready."
+            statusText = previewOnly ? "Preview recommendations updated." : "Recommendations ready."
+            if previewOnly {
+                lastAutoPreviewAt = Date()
+                lastAutoPreviewScannedCount = scannedCount
+            }
             isLoadingRecommendations = false
         } catch {
             isLoadingRecommendations = false
             statusText = "Failed building recommendations: \(error.localizedDescription)"
         }
+    }
+
+    private func shouldAutoRefreshPreview(scannedCount: Int) -> Bool {
+        guard isScanning else { return false }
+        guard !isLoadingRecommendations else { return false }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastAutoPreviewAt) >= autoPreviewInterval else { return false }
+        guard scannedCount >= lastAutoPreviewScannedCount + autoPreviewScannedDelta else { return false }
+
+        return true
     }
 
     private func loadCleanupHistory(pageIndex: Int? = nil, selectJobID: CleanupJobID? = nil) async {

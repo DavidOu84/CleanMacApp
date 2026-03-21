@@ -15,6 +15,12 @@ public struct DefaultRecommendationUseCase: RecommendationUseCase {
         try await buildDuplicateCandidates(sessionID: sessionID, rules: rules)
     }
 
+    public func buildPreview(sessionID: ScanSessionID, rules: RecommendationRules) async throws {
+        // Preview mode is intentionally lightweight to avoid high memory/cpu during active scans.
+        try await buildLargeFileCandidates(sessionID: sessionID, rules: rules)
+        try await buildCacheCandidates(sessionID: sessionID, rules: rules)
+    }
+
     public func list(sessionID: ScanSessionID, type: CandidateType, limit: Int) async throws -> [CleanupCandidate] {
         try await store.fetchCandidates(sessionID: sessionID, type: type, limit: limit)
     }
