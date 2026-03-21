@@ -58,18 +58,21 @@ public actor DefaultScanUseCase: ScanUseCase {
         var scannedCount = 0
         var scannedBytes: Int64 = 0
         var lastPath = ""
-        var seenPaths = Set<String>()
-        var baselineFingerprints: [String: FileFingerprint] = [:]
+        let useIncrementalBaseline = shouldUseIncrementalBaseline(scope: scope)
+        var seenPaths: Set<String>? = useIncrementalBaseline ? [] : nil
+        var baselineFingerprints: [String: FileFingerprint]? = nil
 
         defer {
             finishStream(sessionID: sessionID)
         }
 
         do {
-            do {
-                baselineFingerprints = try await loadBaselineIfAvailable(sessionID: sessionID, scope: scope)
-            } catch {
-                baselineFingerprints = [:]
+            if useIncrementalBaseline {
+                do {
+                    baselineFingerprints = try await loadBaselineIfAvailable(sessionID: sessionID, scope: scope)
+                } catch {
+                    baselineFingerprints = [:]
+                }
             }
 
             let stream = fileSystem.enumerate(at: scope.roots)
@@ -85,8 +88,12 @@ public actor DefaultScanUseCase: ScanUseCase {
                     return
                 }
 
-                seenPaths.insert(metadata.path)
-                if shouldUpsert(metadata: metadata, baseline: baselineFingerprints[metadata.path]) {
+                if useIncrementalBaseline {
+                    seenPaths?.insert(metadata.path)
+                }
+
+                let baseline = baselineFingerprints?[metadata.path]
+                if shouldUpsert(metadata: metadata, baseline: baseline) {
                     try await store.upsertFile(sessionID: sessionID, metadata: metadata)
                 }
                 scannedCount += 1
@@ -112,7 +119,12 @@ public actor DefaultScanUseCase: ScanUseCase {
                 }
             }
 
-            if !baselineFingerprints.isEmpty {
+            if
+                useIncrementalBaseline,
+                let baselineFingerprints,
+                !baselineFingerprints.isEmpty,
+                let seenPaths
+            {
                 let removedPaths = baselineFingerprints.keys.filter { !seenPaths.contains($0) }
                 if !removedPaths.isEmpty {
                     try await store.removeFiles(sessionID: sessionID, paths: removedPaths)
@@ -163,6 +175,16 @@ public actor DefaultScanUseCase: ScanUseCase {
         let fingerprints = try await store.fetchFileFingerprints(sessionID: baselineSessionID)
         try await store.cloneFileIndex(from: baselineSessionID, to: sessionID)
         return fingerprints
+    }
+
+    private func shouldUseIncrementalBaseline(scope: ScanScope) -> Bool {
+        // Full-disk scans can contain millions of files; loading baseline fingerprints
+        // for those sessions can consume massive memory and cause OOM pressure.
+        let hasRootPath = scope.roots.contains { $0.standardizedFileURL.path == "/" }
+        if hasRootPath {
+            return false
+        }
+        return true
     }
 
     private func shouldUpsert(metadata: FileMetadata, baseline: FileFingerprint?) -> Bool {

@@ -42,32 +42,34 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
                             return
                         }
 
-                        do {
-                            let values = try next.resourceValues(forKeys: Set(keys))
-                            let isRegular = values.isRegularFile ?? false
-                            guard isRegular else { continue }
+                        autoreleasepool {
+                            do {
+                                let values = try next.resourceValues(forKeys: Set(keys))
+                                let isRegular = values.isRegularFile ?? false
+                                guard isRegular else { return }
 
-                            let fileSize = Int64(values.fileSize ?? 0)
-                            let modifiedAt = values.contentModificationDate ?? .distantPast
-                            let accessedAt = values.contentAccessDate
+                                let fileSize = Int64(values.fileSize ?? 0)
+                                let modifiedAt = values.contentModificationDate ?? .distantPast
+                                let accessedAt = values.contentAccessDate
 
-                            let path = next.path
-                            let parentPath = next.deletingLastPathComponent().path
+                                let path = next.path
+                                let parentPath = next.deletingLastPathComponent().path
 
-                            continuation.yield(
-                                FileMetadata(
-                                    path: path,
-                                    parentPath: parentPath,
-                                    size: fileSize,
-                                    modifiedAt: modifiedAt,
-                                    accessedAt: accessedAt,
-                                    isDirectory: false,
-                                    fileExtension: next.pathExtension.lowercased(),
-                                    inode: nil
+                                continuation.yield(
+                                    FileMetadata(
+                                        path: path,
+                                        parentPath: parentPath,
+                                        size: fileSize,
+                                        modifiedAt: modifiedAt,
+                                        accessedAt: accessedAt,
+                                        isDirectory: false,
+                                        fileExtension: next.pathExtension.lowercased(),
+                                        inode: nil
+                                    )
                                 )
-                            )
-                        } catch {
-                            continue
+                            } catch {
+                                return
+                            }
                         }
                     }
                 }
