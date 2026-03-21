@@ -142,7 +142,7 @@ struct ContentView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.latestSessionID == nil || viewModel.isScanning)
+                .disabled(viewModel.latestSessionID == nil || viewModel.isLoadingRecommendations)
             }
         }
     }
@@ -155,6 +155,9 @@ struct ContentView: View {
             if viewModel.isScanning {
                 ProgressView()
                     .progressViewStyle(.linear)
+                Text("Candidates are finalized after scan completes. You can click Refresh to preview partial results during scanning.")
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
 
             statRow(label: "Scanned files", value: "\(viewModel.scannedCount)")

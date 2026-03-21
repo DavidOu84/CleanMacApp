@@ -145,6 +145,9 @@ final class AppViewModel: ObservableObject {
             return
         }
         Task {
+            if isScanning {
+                statusText = "Building partial recommendations from current scan progress..."
+            }
             await rebuildAndLoadRecommendations(sessionID: sessionID)
         }
     }
@@ -619,7 +622,9 @@ final class AppViewModel: ObservableObject {
                 case .cancelled:
                     isScanning = false
                     progressTask?.cancel()
-                    statusText = "Scan cancelled."
+                    statusText = "Scan cancelled. Building recommendations from scanned files..."
+                    await loadTopDirectories(sessionID: sessionID)
+                    await rebuildAndLoadRecommendations(sessionID: sessionID)
                     return
                 case let .failed(message):
                     isScanning = false
