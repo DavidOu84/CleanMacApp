@@ -1,8 +1,8 @@
 import Foundation
 
 public actor DefaultScanUseCase: ScanUseCase {
-    private let fileSystem: FileSystemAdapter
-    private let store: ScanSessionStore
+    nonisolated private let fileSystem: FileSystemAdapter
+    nonisolated private let store: ScanSessionStore
 
     private var continuations: [ScanSessionID: AsyncStream<ScanProgress>.Continuation] = [:]
     private var tasks: [ScanSessionID: Task<Void, Never>] = [:]
@@ -54,7 +54,7 @@ public actor DefaultScanUseCase: ScanUseCase {
         continuations[progress.sessionID]?.yield(progress)
     }
 
-    private func runScan(sessionID: ScanSessionID, scope: ScanScope) async {
+    private nonisolated func runScan(sessionID: ScanSessionID, scope: ScanScope) async {
         var scannedCount = 0
         var scannedBytes: Int64 = 0
         var lastPath = ""
@@ -63,7 +63,9 @@ public actor DefaultScanUseCase: ScanUseCase {
         var baselineFingerprints: [String: FileFingerprint]? = nil
 
         defer {
-            finishStream(sessionID: sessionID)
+            Task {
+                await self.finishStream(sessionID: sessionID)
+            }
         }
 
         do {
@@ -75,19 +77,7 @@ public actor DefaultScanUseCase: ScanUseCase {
                 }
             }
 
-            let stream = fileSystem.enumerate(at: scope.roots)
-            for try await metadata in stream {
-                if Task.isCancelled {
-                    try await store.finishSession(
-                        sessionID: sessionID,
-                        status: .cancelled,
-                        finishedAt: Date(),
-                        errorMessage: nil
-                    )
-                    try? await store.performMaintenance()
-                    return
-                }
-
+            try await fileSystem.enumerate(at: scope.roots) { metadata in
                 if useIncrementalBaseline {
                     seenPaths?.insert(metadata.path)
                 }
@@ -106,7 +96,7 @@ public actor DefaultScanUseCase: ScanUseCase {
                         scannedCount: scannedCount,
                         scannedBytes: scannedBytes
                     )
-                    emit(
+                    await self.emit(
                         ScanProgress(
                             sessionID: sessionID,
                             scannedCount: scannedCount,
@@ -138,7 +128,7 @@ public actor DefaultScanUseCase: ScanUseCase {
                 finishedAt: Date(),
                 errorMessage: nil
             )
-            emit(
+            await self.emit(
                 ScanProgress(
                     sessionID: sessionID,
                     scannedCount: scannedCount,
@@ -148,6 +138,19 @@ public actor DefaultScanUseCase: ScanUseCase {
                     isIndeterminate: false
                 )
             )
+            try? await store.performMaintenance()
+        } catch is CancellationError {
+            do {
+                try await store.updateProgress(sessionID: sessionID, scannedCount: scannedCount, scannedBytes: scannedBytes)
+                try await store.finishSession(
+                    sessionID: sessionID,
+                    status: .cancelled,
+                    finishedAt: Date(),
+                    errorMessage: nil
+                )
+            } catch {
+                // Nothing else to do if persistence fails while handling scan cancellation.
+            }
             try? await store.performMaintenance()
         } catch {
             do {
@@ -165,7 +168,10 @@ public actor DefaultScanUseCase: ScanUseCase {
         }
     }
 
-    private func loadBaselineIfAvailable(sessionID: ScanSessionID, scope: ScanScope) async throws -> [String: FileFingerprint] {
+    private nonisolated func loadBaselineIfAvailable(
+        sessionID: ScanSessionID,
+        scope: ScanScope
+    ) async throws -> [String: FileFingerprint] {
         let mode: ScanMode = scope.isQuickMode ? .quick : .custom
 
         guard let baselineSessionID = try await store.fetchMostRecentFinishedSession(mode: mode, scope: scope) else {
@@ -177,7 +183,7 @@ public actor DefaultScanUseCase: ScanUseCase {
         return fingerprints
     }
 
-    private func shouldUseIncrementalBaseline(scope: ScanScope) -> Bool {
+    private nonisolated func shouldUseIncrementalBaseline(scope: ScanScope) -> Bool {
         // Full-disk scans can contain millions of files; loading baseline fingerprints
         // for those sessions can consume massive memory and cause OOM pressure.
         let hasRootPath = scope.roots.contains { $0.standardizedFileURL.path == "/" }
@@ -187,7 +193,7 @@ public actor DefaultScanUseCase: ScanUseCase {
         return true
     }
 
-    private func shouldUpsert(metadata: FileMetadata, baseline: FileFingerprint?) -> Bool {
+    private nonisolated func shouldUpsert(metadata: FileMetadata, baseline: FileFingerprint?) -> Bool {
         guard let baseline else {
             return true
         }

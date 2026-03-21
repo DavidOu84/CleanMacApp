@@ -16,6 +16,8 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
     private let staleRunningSessionTimeout: TimeInterval = 6 * 60 * 60
     private let keepRecentSessions = 3
     private let vacuumThresholdBytes: Int64 = 1_000_000_000
+    private let topDirectorySampleLimit = 120_000
+    private let duplicateSampleCap = 120_000
 
     public init(databaseURL: URL) throws {
         self.databaseURL = databaseURL
@@ -343,17 +345,18 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
             if !staleSessionIDs.isEmpty && databaseFileSize() >= vacuumThresholdBytes {
                 try execute(sql: "VACUUM;")
             }
+            releaseSQLiteMemory()
         }
     }
 
     public func topDirectories(sessionID: ScanSessionID, limit: Int) async throws -> [DirectoryUsage] {
         try lockAndRun {
+            defer { releaseSQLiteMemory() }
             let sql = """
-            SELECT parent_path, SUM(size_bytes) AS total_bytes, COUNT(*) AS file_count
+            SELECT parent_path, size_bytes
             FROM file_index
-            WHERE session_id = ?
-            GROUP BY parent_path
-            ORDER BY total_bytes DESC
+            WHERE session_id = ? AND is_directory = 0
+            ORDER BY size_bytes DESC
             LIMIT ?;
             """
 
@@ -363,17 +366,33 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
             defer { sqlite3_finalize(statement) }
 
             sqlite3_bind_text(statement, 1, sessionID.uuidString, -1, transientDestructor)
-            sqlite3_bind_int(statement, 2, Int32(limit))
+            sqlite3_bind_int(statement, 2, Int32(topDirectorySampleLimit))
 
-            var results: [DirectoryUsage] = []
+            var aggregate: [String: (bytes: Int64, files: Int)] = [:]
             while sqlite3_step(statement) == SQLITE_ROW {
                 let parentPath = stringValue(statement, at: 0) ?? ""
-                let totalBytes = sqlite3_column_int64(statement, 1)
-                let fileCount = Int(sqlite3_column_int64(statement, 2))
-                results.append(DirectoryUsage(parentPath: parentPath, bytes: totalBytes, fileCount: fileCount))
+                let bytes = sqlite3_column_int64(statement, 1)
+                if var item = aggregate[parentPath] {
+                    item.bytes += bytes
+                    item.files += 1
+                    aggregate[parentPath] = item
+                } else {
+                    aggregate[parentPath] = (bytes: bytes, files: 1)
+                }
             }
 
-            return results
+            return aggregate
+                .map { key, value in
+                    DirectoryUsage(parentPath: key, bytes: value.bytes, fileCount: value.files)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.bytes != rhs.bytes {
+                        return lhs.bytes > rhs.bytes
+                    }
+                    return lhs.fileCount > rhs.fileCount
+                }
+                .prefix(max(0, limit))
+                .map { $0 }
         }
     }
 
@@ -483,12 +502,12 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
         limit: Int
     ) async throws -> [DuplicateSizeBucket] {
         try lockAndRun {
+            defer { releaseSQLiteMemory() }
+            let sampleLimit = min(max(limit * 600, 20_000), duplicateSampleCap)
             let sql = """
-            SELECT size_bytes, COUNT(*) AS file_count
+            SELECT size_bytes
             FROM file_index
             WHERE session_id = ? AND is_directory = 0 AND size_bytes >= ?
-            GROUP BY size_bytes
-            HAVING COUNT(*) >= 2
             ORDER BY size_bytes DESC
             LIMIT ?;
             """
@@ -500,17 +519,40 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
 
             sqlite3_bind_text(statement, 1, sessionID.uuidString, -1, transientDestructor)
             sqlite3_bind_int64(statement, 2, minSizeBytes)
-            sqlite3_bind_int(statement, 3, Int32(limit))
+            sqlite3_bind_int(statement, 3, Int32(sampleLimit))
 
             var buckets: [DuplicateSizeBucket] = []
+            var currentSize: Int64?
+            var currentCount = 0
+
             while sqlite3_step(statement) == SQLITE_ROW {
-                buckets.append(
-                    DuplicateSizeBucket(
-                        sizeBytes: sqlite3_column_int64(statement, 0),
-                        fileCount: Int(sqlite3_column_int64(statement, 1))
-                    )
-                )
+                let size = sqlite3_column_int64(statement, 0)
+                if let existing = currentSize {
+                    if size == existing {
+                        currentCount += 1
+                        continue
+                    }
+
+                    if currentCount >= 2 {
+                        buckets.append(DuplicateSizeBucket(sizeBytes: existing, fileCount: currentCount))
+                        if buckets.count >= limit {
+                            return buckets
+                        }
+                    }
+
+                    currentSize = size
+                    currentCount = 1
+                    continue
+                }
+
+                currentSize = size
+                currentCount = 1
             }
+
+            if let existing = currentSize, currentCount >= 2, buckets.count < limit {
+                buckets.append(DuplicateSizeBucket(sizeBytes: existing, fileCount: currentCount))
+            }
+
             return buckets
         }
     }
@@ -1359,6 +1401,8 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
 
         try execute(sql: "PRAGMA journal_mode = WAL;")
         try execute(sql: "PRAGMA synchronous = NORMAL;")
+        try execute(sql: "PRAGMA temp_store = FILE;")
+        try execute(sql: "PRAGMA cache_size = -16384;")
 
         try execute(sql: """
         CREATE TABLE IF NOT EXISTS scan_session (
@@ -1654,6 +1698,11 @@ public final class SQLiteStore: @unchecked Sendable, ScanSessionStore {
         }
 
         return number.int64Value
+    }
+
+    private func releaseSQLiteMemory() {
+        guard let db else { return }
+        _ = sqlite3_db_release_memory(db)
     }
 
     private func prepare(sql: String) throws -> OpaquePointer? {

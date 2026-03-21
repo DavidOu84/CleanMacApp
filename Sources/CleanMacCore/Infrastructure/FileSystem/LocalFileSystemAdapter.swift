@@ -4,88 +4,79 @@ import Foundation
 public struct LocalFileSystemAdapter: FileSystemAdapter {
     public init() {}
 
-    public func enumerate(at roots: [URL]) -> AsyncThrowingStream<FileMetadata, Error> {
-        AsyncThrowingStream { continuation in
-            Task.detached(priority: .utility) {
-                let fileManager = FileManager()
-                let keys: [URLResourceKey] = [
-                    .isRegularFileKey,
-                    .fileSizeKey,
-                    .contentModificationDateKey,
-                    .contentAccessDateKey
-                ]
-                let keySet = Set(keys)
+    public func enumerate(
+        at roots: [URL],
+        onMetadata: (FileMetadata) async throws -> Void
+    ) async throws {
+        let fileManager = FileManager()
+        let keys: [URLResourceKey] = [
+            .isRegularFileKey,
+            .fileSizeKey,
+            .contentModificationDateKey,
+            .contentAccessDateKey
+        ]
+        let keySet = Set(keys)
 
-                for root in roots {
-                    if Task.isCancelled {
-                        continuation.finish()
-                        return
+        for root in roots {
+            try Task.checkCancellation()
+
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+
+            let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            )
+
+            enumerationLoop: while true {
+                try Task.checkCancellation()
+
+                let step: EnumerationStep = autoreleasepool {
+                    guard let next = enumerator?.nextObject() as? URL else {
+                        return .end
                     }
 
-                    var isDirectory: ObjCBool = false
-                    guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-                        continue
-                    }
+                    do {
+                        let values = try next.resourceValues(forKeys: keySet)
+                        let isRegular = values.isRegularFile ?? false
+                        guard isRegular else { return .skip }
 
-                    let enumerator = fileManager.enumerator(
-                        at: root,
-                        includingPropertiesForKeys: keys,
-                        options: [.skipsPackageDescendants],
-                        errorHandler: { _, _ in true }
-                    )
+                        let fileSize = Int64(values.fileSize ?? 0)
+                        let modifiedAt = values.contentModificationDate ?? .distantPast
+                        let accessedAt = values.contentAccessDate
 
-                    enumerationLoop: while true {
-                        if Task.isCancelled {
-                            continuation.finish()
-                            return
-                        }
+                        let path = next.path
+                        let parentPath = next.deletingLastPathComponent().path
 
-                        let step: EnumerationStep = autoreleasepool {
-                            guard let next = enumerator?.nextObject() as? URL else {
-                                return .end
-                            }
-
-                            do {
-                                let values = try next.resourceValues(forKeys: keySet)
-                                let isRegular = values.isRegularFile ?? false
-                                guard isRegular else { return .skip }
-
-                                let fileSize = Int64(values.fileSize ?? 0)
-                                let modifiedAt = values.contentModificationDate ?? .distantPast
-                                let accessedAt = values.contentAccessDate
-
-                                let path = next.path
-                                let parentPath = next.deletingLastPathComponent().path
-
-                                return .metadata(
-                                    FileMetadata(
-                                        path: path,
-                                        parentPath: parentPath,
-                                        size: fileSize,
-                                        modifiedAt: modifiedAt,
-                                        accessedAt: accessedAt,
-                                        isDirectory: false,
-                                        fileExtension: next.pathExtension.lowercased(),
-                                        inode: nil
-                                    )
-                                )
-                            } catch {
-                                return .skip
-                            }
-                        }
-
-                        switch step {
-                        case .end:
-                            break enumerationLoop
-                        case .skip:
-                            continue
-                        case let .metadata(metadata):
-                            continuation.yield(metadata)
-                        }
+                        return .metadata(
+                            FileMetadata(
+                                path: path,
+                                parentPath: parentPath,
+                                size: fileSize,
+                                modifiedAt: modifiedAt,
+                                accessedAt: accessedAt,
+                                isDirectory: false,
+                                fileExtension: next.pathExtension.lowercased(),
+                                inode: nil
+                            )
+                        )
+                    } catch {
+                        return .skip
                     }
                 }
 
-                continuation.finish()
+                switch step {
+                case .end:
+                    break enumerationLoop
+                case .skip:
+                    continue
+                case let .metadata(metadata):
+                    try await onMetadata(metadata)
+                }
             }
         }
     }

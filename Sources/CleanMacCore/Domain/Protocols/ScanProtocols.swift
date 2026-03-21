@@ -43,7 +43,10 @@ public protocol HistoryUseCase: Sendable {
 }
 
 public protocol FileSystemAdapter: Sendable {
-    func enumerate(at roots: [URL]) -> AsyncThrowingStream<FileMetadata, Error>
+    func enumerate(
+        at roots: [URL],
+        onMetadata: (FileMetadata) async throws -> Void
+    ) async throws
     func computeQuickHash(of path: String) async throws -> String
     func computeFullHash(of path: String) async throws -> String
     func moveToTrash(paths: [String]) async -> [String: Error]
