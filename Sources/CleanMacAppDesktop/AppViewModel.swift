@@ -529,7 +529,7 @@ final class AppViewModel: ObservableObject {
                 isCleaning = false
 
                 await loadCleanupHistory(pageIndex: 0, selectJobID: summary.jobID)
-                await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false)
+                await rebuildAndLoadRecommendations(sessionID: sessionID, previewOnly: false, announceStatus: false)
             } catch {
                 isCleaning = false
                 statusText = "Cleanup failed: \(error.localizedDescription)"
@@ -653,12 +653,18 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func rebuildAndLoadRecommendations(sessionID: ScanSessionID, previewOnly: Bool) async {
+    private func rebuildAndLoadRecommendations(
+        sessionID: ScanSessionID,
+        previewOnly: Bool,
+        announceStatus: Bool = true
+    ) async {
         guard !isLoadingRecommendations else { return }
 
         do {
             isLoadingRecommendations = true
-            statusText = previewOnly ? "Building lightweight recommendations..." : "Building recommendations..."
+            if announceStatus {
+                statusText = previewOnly ? "Building lightweight recommendations..." : "Building recommendations..."
+            }
 
             if previewOnly {
                 try await env.recommendationUseCase.buildPreview(sessionID: sessionID, rules: .default)
@@ -685,7 +691,9 @@ final class AppViewModel: ObservableObject {
             candidateSummaries = summaries
             candidatesByType = items
             selectedCandidateIDsByType = selected
-            statusText = previewOnly ? "Preview recommendations updated." : "Recommendations ready."
+            if announceStatus {
+                statusText = previewOnly ? "Preview recommendations updated." : "Recommendations ready."
+            }
             if previewOnly {
                 lastAutoPreviewAt = Date()
                 lastAutoPreviewScannedCount = scannedCount

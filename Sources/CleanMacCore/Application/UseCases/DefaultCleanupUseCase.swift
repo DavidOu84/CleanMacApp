@@ -64,6 +64,7 @@ public struct DefaultCleanupUseCase: CleanupUseCase {
         var successCount = 0
         var failCount = 0
         var reclaimedBytes: Int64 = 0
+        var cleanedPaths: [String] = []
 
         for item in items {
             if let error = failures[item.filePath] {
@@ -80,6 +81,7 @@ public struct DefaultCleanupUseCase: CleanupUseCase {
             } else {
                 successCount += 1
                 reclaimedBytes += item.estimatedBytes
+                cleanedPaths.append(item.filePath)
                 try await store.appendCleanupResult(
                     jobID: jobID,
                     candidateID: item.candidateID,
@@ -89,6 +91,17 @@ public struct DefaultCleanupUseCase: CleanupUseCase {
                     result: .success,
                     errorMessage: nil
                 )
+            }
+        }
+
+        if !cleanedPaths.isEmpty {
+            // Keep in-session index consistent with actual cleanup results
+            // so recommendation rebuild does not re-surface already deleted files.
+            do {
+                try await store.removeFiles(sessionID: sessionID, paths: cleanedPaths)
+            } catch {
+                // Cleanup result itself is already committed in cleanup_result/history;
+                // indexing refresh failure should not invalidate file operations.
             }
         }
 
