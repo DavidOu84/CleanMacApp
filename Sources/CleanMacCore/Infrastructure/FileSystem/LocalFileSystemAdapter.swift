@@ -9,14 +9,12 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
             Task.detached(priority: .utility) {
                 let fileManager = FileManager()
                 let keys: [URLResourceKey] = [
-                    .isDirectoryKey,
                     .isRegularFileKey,
                     .fileSizeKey,
                     .contentModificationDateKey,
-                    .contentAccessDateKey,
-                    .nameKey,
-                    .fileResourceIdentifierKey
+                    .contentAccessDateKey
                 ]
+                let keySet = Set(keys)
 
                 for root in roots {
                     if Task.isCancelled {
@@ -36,17 +34,21 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
                         errorHandler: { _, _ in true }
                     )
 
-                    while let next = enumerator?.nextObject() as? URL {
+                    while true {
                         if Task.isCancelled {
                             continuation.finish()
                             return
                         }
 
-                        autoreleasepool {
+                        let step: EnumerationStep = autoreleasepool {
+                            guard let next = enumerator?.nextObject() as? URL else {
+                                return .end
+                            }
+
                             do {
-                                let values = try next.resourceValues(forKeys: Set(keys))
+                                let values = try next.resourceValues(forKeys: keySet)
                                 let isRegular = values.isRegularFile ?? false
-                                guard isRegular else { return }
+                                guard isRegular else { return .skip }
 
                                 let fileSize = Int64(values.fileSize ?? 0)
                                 let modifiedAt = values.contentModificationDate ?? .distantPast
@@ -55,7 +57,7 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
                                 let path = next.path
                                 let parentPath = next.deletingLastPathComponent().path
 
-                                continuation.yield(
+                                return .metadata(
                                     FileMetadata(
                                         path: path,
                                         parentPath: parentPath,
@@ -68,8 +70,17 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
                                     )
                                 )
                             } catch {
-                                return
+                                return .skip
                             }
+                        }
+
+                        switch step {
+                        case .end:
+                            break
+                        case .skip:
+                            continue
+                        case let .metadata(metadata):
+                            continuation.yield(metadata)
                         }
                     }
                 }
@@ -131,4 +142,10 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
     public func fileExists(_ path: String) -> Bool {
         FileManager.default.fileExists(atPath: path)
     }
+}
+
+private enum EnumerationStep {
+    case end
+    case skip
+    case metadata(FileMetadata)
 }
