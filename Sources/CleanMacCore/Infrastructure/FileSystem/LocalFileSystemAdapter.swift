@@ -34,7 +34,7 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
                         errorHandler: { _, _ in true }
                     )
 
-                    while true {
+                    enumerationLoop: while true {
                         if Task.isCancelled {
                             continuation.finish()
                             return
@@ -76,7 +76,7 @@ public struct LocalFileSystemAdapter: FileSystemAdapter {
 
                         switch step {
                         case .end:
-                            break
+                            break enumerationLoop
                         case .skip:
                             continue
                         case let .metadata(metadata):
