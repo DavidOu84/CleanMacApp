@@ -86,7 +86,7 @@ Scan + cleanup duplicate candidates:
 Desktop app shell:
 
 ```bash
-.build/debug/cleanmacapp-desktop
+.build/debug/CleanMacApp
 ```
 
 Desktop app bundle (Dock icon + Cmd+Tab):

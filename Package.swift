@@ -9,7 +9,7 @@ let package = Package(
     products: [
         .library(name: "CleanMacCore", targets: ["CleanMacCore"]),
         .executable(name: "cleanmacapp-cli", targets: ["CleanMacAppCLI"]),
-        .executable(name: "cleanmacapp-desktop", targets: ["CleanMacAppDesktop"])
+        .executable(name: "CleanMacApp", targets: ["CleanMacAppDesktop"])
     ],
     targets: [
         .target(
