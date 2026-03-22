@@ -26,6 +26,7 @@ final class AppViewModel: ObservableObject {
     @Published var scannedBytes: Int64 = 0
     @Published var currentPath = ""
     @Published var statusText = "Ready"
+    @Published var hasFullDiskAccess = false
 
     @Published var topDirectories: [DirectoryUsage] = []
     @Published var selectedCandidateType: CandidateType = .cache {
@@ -103,13 +104,30 @@ final class AppViewModel: ObservableObject {
     }
 
     func onAppear() {
+        refreshFullDiskAccessStatus()
         Task {
             await loadCleanupHistory(pageIndex: 0)
         }
     }
 
+    func refreshFullDiskAccessStatus() {
+        hasFullDiskAccess = FullDiskAccessHelper.hasFullDiskAccess()
+    }
+
+    func openFullDiskAccessSettings() {
+        FullDiskAccessHelper.openFullDiskAccessSettings()
+        statusText = "Opened System Settings. Enable Full Disk Access for this app, then click Check Again."
+    }
+
     func startScan() {
         guard !isScanning else { return }
+
+        if useFullDiskScan {
+            refreshFullDiskAccessStatus()
+            if !hasFullDiskAccess {
+                statusText = "Full Disk Access not granted. Scan can continue but protected folders may be skipped."
+            }
+        }
 
         let scope = buildScope()
         guard !scope.roots.isEmpty else {

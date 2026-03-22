@@ -20,6 +20,11 @@ struct ContentView: View {
         .onAppear {
             viewModel.onAppear()
         }
+        .onChange(of: viewModel.useFullDiskScan) { isFullDisk in
+            if isFullDisk {
+                viewModel.refreshFullDiskAccessStatus()
+            }
+        }
         .sheet(isPresented: $showingHistoryQueryHelp) {
             historyQueryHelpSheet
         }
@@ -96,6 +101,27 @@ struct ContentView: View {
                 )
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(.orange)
+
+                HStack(spacing: 8) {
+                    statusBadge(
+                        text: viewModel.hasFullDiskAccess ? "Full Disk Access: Granted" : "Full Disk Access: Missing",
+                        color: viewModel.hasFullDiskAccess ? .green : .orange
+                    )
+
+                    Spacer(minLength: 6)
+
+                    Button("Open Settings") {
+                        viewModel.openFullDiskAccessSettings()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isScanning || viewModel.isCleaning)
+
+                    Button("Check Again") {
+                        viewModel.refreshFullDiskAccessStatus()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isScanning || viewModel.isCleaning)
+                }
             }
 
             if scanModeBinding.wrappedValue == .custom {
