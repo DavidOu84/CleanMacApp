@@ -9,6 +9,25 @@ DESKTOP_PRODUCT="CleanMacApp"
 EXECUTABLE_NAME="CleanMacApp"
 ICON_ICNS="$ROOT_DIR/dist/icon/AppIcon.icns"
 ICON_GENERATOR="$ROOT_DIR/scripts/generate_app_icon.sh"
+OPEN_APP=1
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-open)
+      OPEN_APP=0
+      ;;
+    -h|--help)
+      echo "Usage: ./scripts/run_desktop_app.sh [--no-open]"
+      echo "  --no-open   Build and package app, but do not launch it."
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      echo "Use --help for usage." >&2
+      exit 1
+      ;;
+  esac
+done
 
 echo "[1/5] Building desktop binary..."
 (
@@ -70,8 +89,12 @@ PLIST
 
 echo -n "APPL????" >"$APP_DIR/Contents/PkgInfo"
 
-echo "[4/5] Launching app bundle..."
-open "$APP_DIR"
+if [[ "$OPEN_APP" -eq 1 ]]; then
+  echo "[4/5] Launching app bundle..."
+  open "$APP_DIR"
+else
+  echo "[4/5] Skipping launch (--no-open)."
+fi
 
 echo "[5/5] Done."
 echo "App bundle: $APP_DIR"
