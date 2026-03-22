@@ -70,6 +70,10 @@ struct ContentView: View {
                 .font(.system(size: 12, weight: .regular, design: .rounded))
                 .foregroundStyle(.secondary)
 
+            Text("Build: \(AppBuildInfo.label)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+
             Divider()
 
             HStack(spacing: 8) {

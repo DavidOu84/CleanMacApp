@@ -29,6 +29,23 @@ public actor DefaultScanUseCase: ScanUseCase {
 
     public func cancel(sessionID: ScanSessionID) async {
         tasks[sessionID]?.cancel()
+        do {
+            if let snapshot = try await store.fetchSession(sessionID: sessionID) {
+                switch snapshot.status {
+                case .running, .idle:
+                    try await store.finishSession(
+                        sessionID: sessionID,
+                        status: .cancelled,
+                        finishedAt: Date(),
+                        errorMessage: nil
+                    )
+                case .finished, .cancelled, .failed:
+                    break
+                }
+            }
+        } catch {
+            // Best-effort cancellation marker only.
+        }
     }
 
     public func progressStream(sessionID: ScanSessionID) async -> AsyncStream<ScanProgress> {
@@ -91,6 +108,9 @@ public actor DefaultScanUseCase: ScanUseCase {
                 lastPath = metadata.path
 
                 if scannedCount % 200 == 0 {
+                    if try await isSessionCancelled(sessionID: sessionID) {
+                        throw CancellationError()
+                    }
                     try await store.updateProgress(
                         sessionID: sessionID,
                         scannedCount: scannedCount,
@@ -119,6 +139,10 @@ public actor DefaultScanUseCase: ScanUseCase {
                 if !removedPaths.isEmpty {
                     try await store.removeFiles(sessionID: sessionID, paths: removedPaths)
                 }
+            }
+
+            if try await isSessionCancelled(sessionID: sessionID) {
+                throw CancellationError()
             }
 
             try await store.updateProgress(sessionID: sessionID, scannedCount: scannedCount, scannedBytes: scannedBytes)
@@ -208,5 +232,15 @@ public actor DefaultScanUseCase: ScanUseCase {
             metadata.isDirectory == baseline.isDirectory &&
             metadata.fileExtension == baseline.fileExtension
         )
+    }
+
+    private nonisolated func isSessionCancelled(sessionID: ScanSessionID) async throws -> Bool {
+        guard let snapshot = try await store.fetchSession(sessionID: sessionID) else {
+            return false
+        }
+        if case .cancelled = snapshot.status {
+            return true
+        }
+        return false
     }
 }
