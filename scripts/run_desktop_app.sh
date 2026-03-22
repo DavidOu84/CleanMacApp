@@ -7,8 +7,8 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME"
 DESKTOP_PRODUCT="CleanMacApp"
 EXECUTABLE_NAME="CleanMacApp"
-ICON_GENERATOR="$ROOT_DIR/scripts/generate_app_icon.py"
 ICON_ICNS="$ROOT_DIR/dist/icon/AppIcon.icns"
+ICON_GENERATOR="$ROOT_DIR/scripts/generate_app_icon.sh"
 
 echo "[1/5] Building desktop binary..."
 (
@@ -25,7 +25,7 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 echo "[2/5] Building app icon..."
-python3 "$ICON_GENERATOR"
+"$ICON_GENERATOR"
 
 echo "[3/5] Packaging .app bundle..."
 rm -rf "$APP_DIR"
