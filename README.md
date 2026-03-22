@@ -49,6 +49,7 @@ This repository now contains the first runnable implementation slice for the mac
 
 ```bash
 swift build
+swift build --product CleanMacApp
 ```
 
 ## Run
@@ -93,7 +94,18 @@ Desktop app bundle (Dock icon + Cmd+Tab):
 
 ```bash
 ./scripts/run_desktop_app.sh
+./scripts/run_desktop_app.sh --no-open
 ```
+
+## Recent Updates (2026-03-22)
+
+- Desktop executable and app bundle unified as `CleanMacApp` (no more `cleanmacapp-desktop` in Dock title).
+- App bundle now includes a generated branded `AppIcon.icns`.
+- `run_desktop_app.sh` supports `--no-open` (package only, no auto launch).
+- Full-disk mode shows in-app permission controls: `Open Settings` and `Check Again`.
+- Scan cancel path was hardened for faster response and session cancellation consistency.
+- Cleanup now syncs successful deletions back into current session index to avoid re-surfacing deleted files after refresh.
+- History page stores cleanup jobs/results. If history appears empty, clear query filters (for example, `status:failed` filters out successful jobs).
 
 Export a cleanup report by job id:
 

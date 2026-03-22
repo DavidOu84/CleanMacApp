@@ -1,5 +1,16 @@
 # CleanMacApp 下一步实施方案（个人自用版）
 
+> 文档状态：规划存档 + 现状补充（最后更新：2026-03-22）
+>
+> 说明：本文档最初用于“开工前拆解”。当前代码已完成大部分 MVP 闭环，接口与目录实现已与本文部分草案不同。请以 `README.md` 与 `Sources/` 为准，本文保留为设计思路与任务拆解参考。
+
+## 0. 当前实现快照（2026-03-22）
+1. 桌面端产品名：`CleanMacApp`（可执行与 `.app` 名称统一）。
+2. 打包脚本：`./scripts/run_desktop_app.sh`（支持 `--no-open`）。
+3. 权限引导：全盘模式内置 `Open Settings` / `Check Again`。
+4. 清理历史：支持作业记录、失败重试、导出报告。
+5. 性能治理：全盘扫描背压、DB 维护回收、轻量推荐聚合。
+
 ## 1. 范围说明
 - 目标：基于现有 PRD/架构文档，输出可直接开工的工程结构、核心接口和首批开发任务。
 - 约束：先不考虑分发渠道（App Store/官网签名流程），以“本机可运行验证效果”为第一优先级。
@@ -206,7 +217,10 @@ public struct FileMetadata: Sendable {
 }
 
 public protocol FileSystemAdapter {
-    func enumerate(at roots: [URL]) -> AsyncThrowingStream<FileMetadata, Error>
+    func enumerate(
+        at roots: [URL],
+        onMetadata: (FileMetadata) async throws -> Void
+    ) async throws
     func computeQuickHash(of path: String) async throws -> String
     func computeFullHash(of path: String) async throws -> String
     func moveToTrash(paths: [String]) async -> [String: Error]
